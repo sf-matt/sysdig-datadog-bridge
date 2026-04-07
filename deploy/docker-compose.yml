@@ -1,0 +1,28 @@
+services:
+  receiver:
+    image: yourdockerhubuser/sysdig-datadog-bridge:0.1.0
+    container_name: sysdig-webhook-receiver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../logs:/logs
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LISTEN_PORT: 8080
+      LOG_PATH: /logs/events.log
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN}
+    restart: unless-stopped
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.0
+    container_name: sysdig-fluent-bit
+    volumes:
+      - ../fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ../fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - ../logs:/logs
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_LOG_HOST: ${DD_LOG_HOST}
+    depends_on:
+      - receiver
+    restart: unless-stopped

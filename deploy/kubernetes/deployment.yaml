@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sysdig-datadog-bridge
+  namespace: sysdig-datadog-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sysdig-datadog-bridge
+  template:
+    metadata:
+      labels:
+        app: sysdig-datadog-bridge
+    spec:
+      containers:
+        - name: receiver
+          image: YOUR_DOCKERHUB_USER/sysdig-datadog-bridge:0.1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: LISTEN_HOST
+              value: "0.0.0.0"
+            - name: LISTEN_PORT
+              value: "8080"
+            - name: LOG_PATH
+              value: "/logs/events.log"
+            - name: WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: datadog-secret
+                  key: WEBHOOK_TOKEN
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+        - name: fluent-bit
+          image: fluent/fluent-bit:3.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: datadog-secret
+                  key: DD_API_KEY
+            - name: DD_LOG_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: bridge-config
+                  key: DD_LOG_HOST
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+              readOnly: true
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc/parsers.conf
+              subPath: parsers.conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: sysdig-bridge-logs
+        - name: fluent-bit-config
+          configMap:
+            name: fluent-bit-config
