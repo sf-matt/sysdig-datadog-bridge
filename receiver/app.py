@@ -21,6 +21,72 @@ def append_record(record: dict) -> None:
 
 
 def normalize_payload(body: dict) -> dict:
+    # Sysdig Event Forwarder schema
+    # severity is an integer: 1=emergency,2=alert,3=critical,4=error,5=warning,6=notice,7=debug
+    if "content" in body or "labels" in body:
+        content = body.get("content", {})
+        labels = body.get("labels", {})
+
+        title = content.get("ruleName") or body.get("name") or "Sysdig Event"
+        policy = body.get("name")
+        message = content.get("output") or policy or title
+        rule = content.get("ruleName")
+        rule_tags = content.get("ruleTags", [])
+        event_type = body.get("type")
+        category = body.get("category")
+        engine = body.get("engine")
+        cluster = labels.get("kubernetes.cluster.name")
+        node = labels.get("kubernetes.node.name")
+        host = labels.get("host.hostName")
+        container_id = body.get("containerId") or content.get("fields", {}).get("container.id")
+        container_name = content.get("fields", {}).get("container.name")
+        proc_name = content.get("fields", {}).get("proc.name")
+        proc_cmdline = content.get("fields", {}).get("proc.cmdline")
+        user_name = content.get("fields", {}).get("user.name")
+        mitre_tactics = [t for t in rule_tags if t.startswith("MITRE_TA")]
+        mitre_techniques = [t for t in rule_tags if t.startswith("MITRE_T") and not t.startswith("MITRE_TA")]
+
+        int_severity_map = {
+            1: ("emergency", "critical"),
+            2: ("alert", "critical"),
+            3: ("critical", "error"),
+            4: ("error", "error"),
+            5: ("warning", "warning"),
+            6: ("notice", "info"),
+            7: ("debug", "info"),
+        }
+        raw_sev = body.get("severity", 6)
+        severity_label, status = int_severity_map.get(int(raw_sev), ("info", "info"))
+
+        return {
+            "timestamp": body.get("timestampRFC3339Nano") or now_utc(),
+            "source": "sysdig",
+            "service": "sysdig-webhook-bridge",
+            "status": status,
+            "severity": severity_label,
+            "sysdig_severity": raw_sev,
+            "title": title,
+            "message": message,
+            "rule": rule,
+            "policy": policy,
+            "event_type": event_type,
+            "category": category,
+            "engine": engine,
+            "cluster": cluster,
+            "node": node,
+            "host": host,
+            "container_id": container_id,
+            "container_name": container_name,
+            "proc_name": proc_name,
+            "proc_cmdline": proc_cmdline,
+            "user_name": user_name,
+            "mitre_tactics": mitre_tactics,
+            "mitre_techniques": mitre_techniques,
+            "rule_tags": rule_tags,
+            "raw": body,
+        }
+
+    # Sysdig Notification Channel schema (legacy)
     title = body.get("eventName") or body.get("name") or "Sysdig Event"
     message = body.get("details") or body.get("body") or title
     severity = str(body.get("severity", "info")).lower()

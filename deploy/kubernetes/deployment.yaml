@@ -13,6 +13,8 @@ spec:
       labels:
         app: sysdig-datadog-bridge
     spec:
+      securityContext:
+        fsGroup: 1001
       containers:
         - name: receiver
           image: sfmatt/sysdig-datadog-bridge:0.1.0

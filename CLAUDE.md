@@ -5,19 +5,21 @@ Webhook bridge that receives Sysdig security events and forwards them to Datadog
 ## Architecture
 
 ```
-Sysdig (webhook POST + Bearer token)
+Sysdig Event Forwarder (webhook POST + Bearer token)
   → receiver/app.py (Python stdlib HTTP server, port 8080)
   → /logs/events.log (JSON Lines)
   → Fluent Bit (tails log file)
-  → Datadog Logs intake
+  → Datadog Logs intake (source:sysdig)
 ```
 
 ## Key Files
 
 - `receiver/app.py` — HTTP server, bearer token auth, event normalization, writes JSONL
+- `receiver/Dockerfile` — non-root (uid 1001), includes HEALTHCHECK
 - `fluent-bit/fluent-bit.conf` — standalone (docker-compose) Fluent Bit config
 - `deploy/docker-compose.yml` — local/VM deployment
-- `deploy/kubernetes/` — K8s manifests (namespace, deployment, service, secrets, configmaps)
+- `deploy/kubernetes/` — K8s manifests (namespace, deployment, service, secrets, configmaps, PVC)
+- `.github/workflows/docker-publish.yml` — builds multi-arch image and pushes to Docker Hub on main/tag
 
 ## Environment Variables
 
@@ -25,7 +27,8 @@ Sysdig (webhook POST + Bearer token)
 |---|---|---|
 | `WEBHOOK_TOKEN` | receiver | Bearer token Sysdig must send in `Authorization` header |
 | `DD_API_KEY` | fluent-bit | Datadog API key (secret) |
-| `DD_LOG_HOST` | fluent-bit | Datadog log intake hostname (see sites below) |
+| `DD_LOG_HOST` | fluent-bit | Datadog log intake hostname |
+| `DEBUG` | receiver | Set to `true` to log raw payloads to stdout |
 | `LISTEN_HOST` | receiver | Bind address (default `0.0.0.0`) |
 | `LISTEN_PORT` | receiver | Bind port (default `8080`) |
 | `LOG_PATH` | receiver | Path to write events (default `/logs/events.log`) |
@@ -40,34 +43,49 @@ Sysdig (webhook POST + Bearer token)
 | EU  | `http-intake.logs.datadoghq.eu` |
 | AP1 | `http-intake.logs.ap1.datadoghq.com` |
 
-## Local Dev (docker-compose)
+## Sysdig Event Schema
 
-```sh
-cp .env.example .env
-# fill in DD_API_KEY, DD_LOG_HOST, WEBHOOK_TOKEN
-docker compose -f deploy/docker-compose.yml up
-```
+The receiver handles two Sysdig schemas:
 
-Test the webhook:
-```sh
-curl -X POST http://localhost:8080/sysdig-webhook \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"eventName":"Test","severity":"high","ruleName":"Test Rule"}'
-```
+**Event Forwarder** (primary) — detected by presence of `content` or `labels` keys:
+- `severity` is an integer (1-7), not a string
+- `content.ruleName` → `rule`
+- `name` → `policy`
+- `content.output` → `message`
+- `labels.kubernetes.cluster.name` → `cluster`
+- `labels.kubernetes.node.name` → `node`
+- `content.fields.*` → `proc_name`, `proc_cmdline`, `user_name`, `container_name`
+- `content.ruleTags` → `mitre_tactics`, `mitre_techniques`, `rule_tags`
+
+**Notification Channel** (legacy fallback):
+- `eventName` / `name` → `title`
+- `details` / `body` → `message`
+- `severity` is a string (low/medium/high/critical)
+- `scope` parsed for cluster/node
+
+## Severity Mapping (Event Forwarder)
+
+| Sysdig int | Label | DD status |
+|---|---|---|
+| 1 | emergency | critical |
+| 2 | alert | critical |
+| 3 | critical | error |
+| 4 | error | error |
+| 5 | warning | warning |
+| 6 | notice | info |
+| 7 | debug | info |
 
 ## Kubernetes Deploy
 
+**Critical gotchas learned in testing:**
+- Use `kubectl create secret --from-literal` with raw values — never pre-base64-encode, it causes double-encoding
+- `echo` adds a newline — always use `echo -n` if manually encoding anything
+- `fsGroup: 1001` on the pod spec is required so the PVC is writable by the non-root container
+- GH Action build context must be `receiver` not `.` (Dockerfile is in a subdirectory)
+- Sysdig requires a hostname in the endpoint URL — use nip.io for quick DNS: `http://<ip>.nip.io/sysdig-webhook`
+
+**Apply order:**
 ```sh
-# 1. Fill placeholders in secret-datadog.yaml
-echo -n 'your-dd-api-key' | base64   # → DD_API_KEY
-echo -n 'your-webhook-token' | base64  # → WEBHOOK_TOKEN
-
-# 2. Set your DD site in configmap-bridge.yaml (DD_LOG_HOST)
-
-# 3. Set your image in deployment.yaml
-
-# 4. Apply
 kubectl apply -f deploy/kubernetes/namespace.yaml
 kubectl apply -f deploy/kubernetes/configmap-bridge.yaml
 kubectl apply -f deploy/kubernetes/configmap-fluent-bit.yaml
@@ -77,24 +95,33 @@ kubectl apply -f deploy/kubernetes/deployment.yaml
 kubectl apply -f deploy/kubernetes/service.yaml
 ```
 
+**Create secret correctly:**
+```sh
+kubectl create secret generic datadog-secret \
+  -n sysdig-datadog-bridge \
+  --from-literal=DD_API_KEY='your-key' \
+  --from-literal=WEBHOOK_TOKEN='your-token' \
+  --save-config \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+**Debug mode (no rebuild needed):**
+```sh
+kubectl set env deployment/sysdig-datadog-bridge -n sysdig-datadog-bridge -c receiver DEBUG=true
+kubectl set env deployment/sysdig-datadog-bridge -n sysdig-datadog-bridge -c receiver DEBUG-
+```
+
 ## Sysdig Webhook Config
 
-In the Sysdig UI, create a webhook notification channel pointing to the LoadBalancer IP/hostname on port 80. Add a custom header:
+In Sysdig Secure: **Integrations → Add Integrations → Webhook — SIEM & Data Platforms**
+- Authentication: Bearer Token
+- Secret: raw WEBHOOK_TOKEN value
+
+## Datadog Detection Rule Queries
 
 ```
-Authorization: Bearer <WEBHOOK_TOKEN value>
+source:sysdig @rule:"Read sensitive file untrusted"
+source:sysdig @mitre_tactics:*TA0006*
+source:sysdig @status:error
+source:sysdig @user_name:root @proc_cmdline:*shadow*
 ```
-
-## Event Normalization
-
-Incoming Sysdig fields mapped to output:
-
-| Sysdig field | Output field |
-|---|---|
-| `eventName` / `name` | `title` |
-| `details` / `body` | `message` |
-| `severity` | `severity` + `status` (low→info, medium→warning, high/critical→error) |
-| `ruleName` | `rule` |
-| `policyName` | `policy` |
-| `eventUrl` | `event_url` |
-| `scope` (parsed) | `cluster`, `node` |
