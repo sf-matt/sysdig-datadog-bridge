@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: receiver
-          image: YOUR_DOCKERHUB_USER/sysdig-datadog-bridge:0.1.0
+          image: sfmatt/sysdig-datadog-bridge:0.1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
