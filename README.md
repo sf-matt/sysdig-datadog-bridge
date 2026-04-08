@@ -80,9 +80,19 @@ kubectl get svc -n sysdig-datadog-bridge
 
 ## Sysdig Webhook Setup
 
-In the Sysdig UI, create a webhook notification channel:
-- **URL:** `http://<external-ip>/sysdig-webhook`
-- **Custom header:** `Authorization: Bearer <WEBHOOK_TOKEN>`
+> Before configuring, ensure your firewall allows inbound traffic from [Sysdig's outbound IPs](https://docs.sysdig.com/en/docs/administration/saas-regions-and-ip-ranges/) for your region.
+
+1. In Sysdig Secure, go to **Integrations → Add Integrations**
+2. Select **Webhook — SIEM & Data Platforms**
+3. Fill in the fields:
+   - **Integration Name:** e.g. `Datadog Bridge`
+   - **Endpoint:** `http://<external-ip>/sysdig-webhook`
+   - **Authentication:** Bearer Token
+   - **Secret:** your `WEBHOOK_TOKEN` value
+4. Under **Data to Send**, select the event types you want forwarded
+5. Save and use the **Test** button to send a sample event
+
+> Note: Sysdig batches events by time proximity and sends them as JSON arrays in a single request. The receiver handles both single events and arrays.
 
 ## Building the Image
 

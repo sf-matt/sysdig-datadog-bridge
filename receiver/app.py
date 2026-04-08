@@ -7,6 +7,7 @@ LISTEN_HOST = os.getenv("LISTEN_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("LISTEN_PORT", "8080"))
 LOG_PATH = os.getenv("LOG_PATH", "/logs/events.log")
 WEBHOOK_TOKEN = os.getenv("WEBHOOK_TOKEN", "")
+DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def now_utc() -> str:
@@ -134,6 +135,9 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"ok": False, "error": "invalid json"})
             return
+
+        if DEBUG:
+            print(f"DEBUG raw payload: {json.dumps(parsed_body, indent=2)}", flush=True)
 
         try:
             records = normalize_records(parsed_body)
