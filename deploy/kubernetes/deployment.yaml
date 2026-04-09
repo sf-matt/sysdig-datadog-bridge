@@ -17,7 +17,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: receiver
-          image: sfmatt/sysdig-datadog-bridge:0.1.0
+          image: sfmatt/sysdig-datadog-bridge:1.0.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
