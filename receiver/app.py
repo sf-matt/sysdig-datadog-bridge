@@ -20,12 +20,39 @@ def append_record(record: dict) -> None:
         f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
 
+def _get_nested(d: dict, *keys):
+    """Traverse a nested dict by keys, return None if any key is missing."""
+    val = d
+    for key in keys:
+        if not isinstance(val, dict):
+            return None
+        val = val.get(key)
+    return val
+
+
+def _get_label(labels: dict, *path):
+    """Get a label value — handles both flat dot-notation and nested dicts."""
+    flat_key = ".".join(path)
+    if flat_key in labels:
+        return labels[flat_key]
+    return _get_nested(labels, *path)
+
+
+def _get_field(fields: dict, *path):
+    """Get a field value — handles both flat dot-notation and nested dicts."""
+    flat_key = ".".join(path)
+    if flat_key in fields:
+        return fields[flat_key]
+    return _get_nested(fields, *path)
+
+
 def normalize_payload(body: dict) -> dict:
-    # Sysdig Event Forwarder schema
-    # severity is an integer: 1=emergency,2=alert,3=critical,4=error,5=warning,6=notice,7=debug
+    # Sysdig Event Forwarder schema — detected by presence of content or labels
+    # severity is an integer: 0-3=High, 4-5=Medium, 6=Low, 7=Info
     if "content" in body or "labels" in body:
         content = body.get("content", {})
         labels = body.get("labels", {})
+        fields = content.get("fields", {})
 
         title = content.get("ruleName") or body.get("name") or "Sysdig Event"
         policy = body.get("name")
@@ -35,28 +62,27 @@ def normalize_payload(body: dict) -> dict:
         event_type = body.get("type")
         category = body.get("category")
         engine = body.get("engine")
-        cluster = labels.get("kubernetes.cluster.name")
-        node = labels.get("kubernetes.node.name")
-        host = labels.get("host.hostName")
-        container_id = body.get("containerId") or content.get("fields", {}).get("container.id")
-        container_name = content.get("fields", {}).get("container.name")
-        proc_name = content.get("fields", {}).get("proc.name")
-        proc_cmdline = content.get("fields", {}).get("proc.cmdline")
-        user_name = content.get("fields", {}).get("user.name")
+        cluster = _get_label(labels, "kubernetes", "cluster", "name")
+        node = _get_label(labels, "kubernetes", "node", "name")
+        host = _get_label(labels, "host", "hostName")
+        container_id = body.get("containerId") or _get_field(fields, "container", "id")
+        container_name = _get_field(fields, "container", "name")
+        proc_name = _get_field(fields, "proc", "name")
+        proc_cmdline = _get_field(fields, "proc", "cmdline")
+        user_name = _get_field(fields, "user", "name")
         mitre_tactics = [t for t in rule_tags if t.startswith("MITRE_TA")]
         mitre_techniques = [t for t in rule_tags if t.startswith("MITRE_T") and not t.startswith("MITRE_TA")]
 
-        int_severity_map = {
-            1: ("emergency", "critical"),
-            2: ("alert", "critical"),
-            3: ("critical", "error"),
-            4: ("error", "error"),
-            5: ("warning", "warning"),
-            6: ("notice", "info"),
-            7: ("debug", "info"),
-        }
-        raw_sev = body.get("severity", 6)
-        severity_label, status = int_severity_map.get(int(raw_sev), ("info", "info"))
+        # Sysdig severity: 0-3=High, 4-5=Medium, 6=Low, 7=Info
+        raw_sev = int(body.get("severity", 7))
+        if raw_sev <= 3:
+            severity_label, status = "high", "error"
+        elif raw_sev <= 5:
+            severity_label, status = "medium", "warning"
+        elif raw_sev == 6:
+            severity_label, status = "low", "info"
+        else:
+            severity_label, status = "info", "info"
 
         return {
             "timestamp": body.get("timestampRFC3339Nano") or now_utc(),

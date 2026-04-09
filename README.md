@@ -176,15 +176,12 @@ Events land in Datadog Logs under `source:sysdig` with these top-level attribute
 
 ### Sysdig Severity Mapping
 
-| Sysdig severity | Label | Datadog status |
-|---|---|---|
-| 1 | emergency | critical |
-| 2 | alert | critical |
-| 3 | critical | error |
-| 4 | error | error |
-| 5 | warning | warning |
-| 6 | notice | info |
-| 7 | debug | info |
+| Sysdig integer | Sysdig label | Datadog log status | Datadog SIEM signal |
+|---|---|---|---|
+| 0-3 | High | `error` | `high` |
+| 4-5 | Medium | `warning` | `medium` |
+| 6 | Low | `info` | `low` |
+| 7 | Info | `info` | `info` |
 
 ## Datadog Cloud SIEM Setup
 
@@ -232,10 +229,9 @@ Go to **Security → Cloud SIEM → Detection Rules → New Rule → Log Detecti
 
 | Rule query | Signal severity | Signal title |
 |---|---|---|
-| `source:sysdig @status:critical` | Critical | `Sysdig: {{@rule}}` |
-| `source:sysdig @status:error` | High | `Sysdig: {{@rule}}` |
+| `source:sysdig @status:(critical OR error)` | High | `Sysdig: {{@rule}}` |
 | `source:sysdig @status:warning` | Medium | `Sysdig: {{@rule}}` |
-| `source:sysdig @status:info` | Info | `Sysdig: {{@rule}}` |
+| `source:sysdig @status:info` | Low | `Sysdig: {{@rule}}` |
 
 For each rule:
 - **Group by:** `@rule` — one signal per unique Sysdig rule firing

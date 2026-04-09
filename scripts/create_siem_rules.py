@@ -32,37 +32,35 @@ URL = f"https://{DD_API_HOST}/api/v2/security_monitoring/rules"
 
 RULES = [
     {
-        "status": "critical",
-        "signal_severity": "critical",
-        "name": "Sysdig - Critical Severity Events",
-    },
-    {
-        "status": "error",
+        "query": "source:sysdig @status:(critical OR error)",
         "signal_severity": "high",
         "name": "Sysdig - High Severity Events",
+        "query_name": "sysdig_high",
     },
     {
-        "status": "warning",
+        "query": "source:sysdig @status:warning",
         "signal_severity": "medium",
         "name": "Sysdig - Medium Severity Events",
+        "query_name": "sysdig_medium",
     },
     {
-        "status": "info",
-        "signal_severity": "info",
-        "name": "Sysdig - Info Severity Events",
+        "query": "source:sysdig @status:info",
+        "signal_severity": "low",
+        "name": "Sysdig - Low Severity Events",
+        "query_name": "sysdig_low",
     },
 ]
 
 
 def create_rule(rule: dict) -> dict:
-    query_name = f"sysdig_{rule['status']}"
+    query_name = rule["query_name"]
     payload = {
         "name": rule["name"],
         "type": "log_detection",
         "isEnabled": True,
         "queries": [
             {
-                "query": f"source:sysdig @status:{rule['status']}",
+                "query": rule["query"],
                 "groupByFields": ["@rule"],
                 "aggregation": "count",
                 "name": query_name,

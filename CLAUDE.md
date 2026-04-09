@@ -65,15 +65,14 @@ The receiver handles two Sysdig schemas:
 
 ## Severity Mapping (Event Forwarder)
 
-| Sysdig int | Label | DD status |
-|---|---|---|
-| 1 | emergency | critical |
-| 2 | alert | critical |
-| 3 | critical | error |
-| 4 | error | error |
-| 5 | warning | warning |
-| 6 | notice | info |
-| 7 | debug | info |
+From Sysdig API docs: 0-3=High, 4-5=Medium, 6=Low, 7=Info
+
+| Sysdig int | Sysdig label | DD log status | DD SIEM signal |
+|---|---|---|---|
+| 0-3 | High | `error` | `high` |
+| 4-5 | Medium | `warning` | `medium` |
+| 6 | Low | `info` | `low` |
+| 7 | Info | `info` | `info` |
 
 ## Kubernetes Deploy
 
