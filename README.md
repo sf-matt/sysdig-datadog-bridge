@@ -229,9 +229,10 @@ Go to **Security → Cloud SIEM → Detection Rules → New Rule → Log Detecti
 
 | Rule query | Signal severity | Signal title |
 |---|---|---|
-| `source:sysdig @status:(critical OR error)` | High | `Sysdig: {{@rule}}` |
-| `source:sysdig @status:warning` | Medium | `Sysdig: {{@rule}}` |
-| `source:sysdig @status:info` | Low | `Sysdig: {{@rule}}` |
+| `source:sysdig @severity:high` | High | `Sysdig: {{@rule}}` |
+| `source:sysdig @severity:medium` | Medium | `Sysdig: {{@rule}}` |
+| `source:sysdig @severity:low` | Low | `Sysdig: {{@rule}}` |
+| `source:sysdig @severity:info` | Info | `Sysdig: {{@rule}}` |
 
 For each rule:
 - **Group by:** `@rule` — one signal per unique Sysdig rule firing

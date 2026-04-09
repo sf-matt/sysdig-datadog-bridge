@@ -32,22 +32,28 @@ URL = f"https://{DD_API_HOST}/api/v2/security_monitoring/rules"
 
 RULES = [
     {
-        "query": "source:sysdig @status:(critical OR error)",
+        "query": "source:sysdig @severity:high",
         "signal_severity": "high",
         "name": "Sysdig - High Severity Events",
         "query_name": "sysdig_high",
     },
     {
-        "query": "source:sysdig @status:warning",
+        "query": "source:sysdig @severity:medium",
         "signal_severity": "medium",
         "name": "Sysdig - Medium Severity Events",
         "query_name": "sysdig_medium",
     },
     {
-        "query": "source:sysdig @status:info",
+        "query": "source:sysdig @severity:low",
         "signal_severity": "low",
         "name": "Sysdig - Low Severity Events",
         "query_name": "sysdig_low",
+    },
+    {
+        "query": "source:sysdig @severity:info",
+        "signal_severity": "info",
+        "name": "Sysdig - Info Severity Events",
+        "query_name": "sysdig_info",
     },
 ]
 
@@ -111,8 +117,11 @@ def create_rule(rule: dict) -> dict:
             return result
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        print(f"  failed:  {rule['name']} — {e.code} {body}")
-        raise
+        if e.code == 400 and "AlreadyExists" in body:
+            print(f"  skipped: {rule['name']} — already exists (delete it in DD UI to recreate)")
+        else:
+            print(f"  failed:  {rule['name']} — {e.code} {body}")
+        return None
 
 
 def main():
