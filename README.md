@@ -46,7 +46,26 @@ cp .env.example .env
 
 ## Deploy: Kubernetes
 
-**1. Create the secret**
+**1. Set your Datadog site**
+
+Edit `deploy/kubernetes/configmap-bridge.yaml` and set `DD_LOG_HOST` to match your org.
+
+**2. Set your image**
+
+Edit `deploy/kubernetes/deployment.yaml` and set your Docker Hub image path.
+
+**3. Apply manifests**
+
+```sh
+kubectl apply -f deploy/kubernetes/namespace.yaml
+kubectl apply -f deploy/kubernetes/configmap-bridge.yaml
+kubectl apply -f deploy/kubernetes/configmap-fluent-bit.yaml
+kubectl apply -f deploy/kubernetes/pvc-logs.yaml
+kubectl apply -f deploy/kubernetes/deployment.yaml
+kubectl apply -f deploy/kubernetes/service.yaml
+```
+
+**4. Create the secret**
 
 Use `--from-literal` — do NOT pre-base64-encode the values, kubectl handles encoding automatically:
 
@@ -57,26 +76,6 @@ kubectl create secret generic datadog-secret \
   --from-literal=WEBHOOK_TOKEN='your-webhook-token' \
   --save-config \
   --dry-run=client -o yaml | kubectl apply -f -
-```
-
-**2. Set your Datadog site**
-
-Edit `deploy/kubernetes/configmap-bridge.yaml` and set `DD_LOG_HOST` to match your org.
-
-**3. Set your image**
-
-Edit `deploy/kubernetes/deployment.yaml` and set your Docker Hub image path.
-
-**4. Apply**
-
-```sh
-kubectl apply -f deploy/kubernetes/namespace.yaml
-kubectl apply -f deploy/kubernetes/configmap-bridge.yaml
-kubectl apply -f deploy/kubernetes/configmap-fluent-bit.yaml
-kubectl apply -f deploy/kubernetes/secret-datadog.yaml
-kubectl apply -f deploy/kubernetes/pvc-logs.yaml
-kubectl apply -f deploy/kubernetes/deployment.yaml
-kubectl apply -f deploy/kubernetes/service.yaml
 ```
 
 **5. Get the external IP**
@@ -187,17 +186,92 @@ Events land in Datadog Logs under `source:sysdig` with these top-level attribute
 | 6 | notice | info |
 | 7 | debug | info |
 
-## Datadog Detection Rules
+## Datadog Cloud SIEM Setup
 
-> Coming soon — detection rule examples will be documented here after testing.
+### 1. Enable the Log Source
 
-Example log search queries for building rules:
+Sysdig events arrive via Fluent Bit as standard Datadog logs — no additional log pipeline setup is needed. However, Cloud SIEM must be told to analyze them:
+
+1. In Datadog, go to **Security → Cloud SIEM → Setup**
+2. Under **Log Sources**, click **Add a log source**
+3. Select **Other Logs**
+4. Set the filter to `source:sysdig`
+5. Save — Cloud SIEM will now analyze all incoming Sysdig events for signal generation
+
+### 2. Configure Log Retention
+
+By default Datadog log retention is short. For compliance use cases (SOC2, NIST, HIPAA etc.) you need logs retained long enough to satisfy your audit requirements.
+
+1. In Datadog, go to **Logs → Configuration → Indexes**
+2. Find or create an index for `source:sysdig`
+3. Set the retention period to match your compliance requirement (typically 90 days minimum, 1 year for many frameworks)
+
+> This is important — Sysdig's own retention is limited. Datadog is the long-term record of all security findings.
+
+### 3. Create Detection Rules
+
+Datadog signal severity is fixed per rule, not dynamically mapped from a field. Create one rule per severity bucket so every Sysdig event generates a signal with the correct severity.
+
+**Option A — Automated (recommended)**
+
+You'll need a Datadog Application Key with `security_monitoring_rules_write` scope:
+- Datadog → **Organization Settings → Application Keys → New Key**
+
+```sh
+DD_API_KEY='your-api-key' \
+DD_APP_KEY='your-app-key' \
+DD_API_HOST='api.us5.datadoghq.com' \
+python3 scripts/create_siem_rules.py
 ```
-source:sysdig @rule:"Read sensitive file untrusted"
+
+This creates all four rules in one shot. `DD_API_HOST` defaults to `api.datadoghq.com` (US1) — adjust for your site.
+
+**Option B — Manual**
+
+Go to **Security → Cloud SIEM → Detection Rules → New Rule → Log Detection** and create four rules:
+
+| Rule query | Signal severity | Signal title |
+|---|---|---|
+| `source:sysdig @status:critical` | Critical | `Sysdig: {{@rule}}` |
+| `source:sysdig @status:error` | High | `Sysdig: {{@rule}}` |
+| `source:sysdig @status:warning` | Medium | `Sysdig: {{@rule}}` |
+| `source:sysdig @status:info` | Info | `Sysdig: {{@rule}}` |
+
+For each rule:
+- **Group by:** `@rule` — one signal per unique Sysdig rule firing
+- **Evaluation window:** 5 minutes
+- **Signal title:** `Sysdig: {{@rule}}` — signal name reflects the actual finding
+
+This means every event Sysdig sends becomes a signal, severity automatically reflects the Sysdig rating, and signals are named by the specific rule that fired.
+
+### 4. Compliance Queries
+
+All Sysdig compliance framework tags are forwarded in `@rule_tags` and can be used to query the full audit trail:
+
+```
+# SOC2
+source:sysdig @rule_tags:SOC2*
+
+# NIST 800-53
+source:sysdig @rule_tags:NIST_800-53*
+
+# HIPAA
+source:sysdig @rule_tags:HIPAA*
+
+# HITRUST
+source:sysdig @rule_tags:HITRUST*
+
+# MITRE credential access
 source:sysdig @mitre_tactics:*TA0006*
-source:sysdig @status:error @cluster:*
-source:sysdig @user_name:root @proc_cmdline:*shadow*
+
+# Specific rule across all time
+source:sysdig @rule:"Read sensitive file untrusted"
+
+# All root activity
+source:sysdig @user_name:root
 ```
+
+These queries work in both Datadog Logs (full event detail) and Cloud SIEM (correlated signals), giving auditors a complete picture of security findings against each compliance framework.
 
 ## Debugging
 
